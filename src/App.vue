@@ -1,26 +1,21 @@
 <script>
-import todos from "./data/todos";
+import { getTodos, createTodo, updateTodo, deleteTodo } from "./api/todos";
+import Message from "./components/Message.vue";
 import StatusFilter from "./components/StatusFilter.vue";
 import TodoItem from "./components/TodoItem.vue";
-
-function getFromLocalStorage(key, defaultValue) {
-  try {
-    return JSON.parse(localStorage.getItem(key));
-  } catch (e) {
-    return defaultValue;
-  }
-}
 
 export default {
   components: {
     StatusFilter,
     TodoItem,
+    Message,
   },
   data() {
     return {
-      todos: getFromLocalStorage("todos", []),
+      todos: [],
       title: "",
       status: "all",
+      errorMessage: "",
     };
   },
   computed: {
@@ -43,23 +38,63 @@ export default {
       }
     },
   },
-  watch: {
-    todos: {
-      deep: true,
-      handler() {
-        localStorage.setItem("todos", JSON.stringify(this.todos));
-      },
-    },
+  // watch: {
+  //   todos: {
+  //     deep: true,
+  //     handler() {
+  //       localStorage.setItem("todos", JSON.stringify(this.todos));
+  //     },
+  //   },
+  // },
+  mounted() {
+    getTodos()
+      .then(({ data }) => {
+        this.todos = data;
+      })
+      .catch(() => {
+        this.errorMessage = "Unable to load todos";
+      });
   },
   methods: {
     handleSubmit() {
-      this.todos.push({
-        id: Date.now(),
-        title: this.title,
-        completed: false,
+      createTodo(this.title).then(({ data }) => {
+        this.todos = [...this.todos, data];
+        this.title = "";
       });
-
-      this.title = "";
+    },
+    updateTodo({ id, title, completed }) {
+      updateTodo({ id, title, completed }).then(({ data }) => {
+        this.todos = this.todos.map((todo) => (todo.id != id ? todo : data));
+      });
+    },
+    deleteTodo(todoId) {
+      deleteTodo(todoId).then(() => {
+        this.todos = this.todos.filter((todo) => todo.id != todoId);
+      });
+    },
+    clearCompleted() {
+      const completedIds = this.completedTodos.map((todo) => todo.id);
+      Promise.all(completedIds.map((id) => deleteTodo(id)))
+        .then(() => {
+          this.todos = this.todos.filter((todo) => !completedIds.includes(todo.id));
+        })
+        .catch(() => {
+          this.errorMessage = "Unable to delete completed todos";
+        });
+    },
+    toggleAll() {
+      const allCompleted = this.activeTodos.length === 0;
+      Promise.all(
+        this.todos.map((todo) =>
+          updateTodo({ ...todo, completed: !allCompleted }).then(({ data }) => data)
+        )
+      )
+        .then((updatedTodos) => {
+          this.todos = updatedTodos;
+        })
+        .catch(() => {
+          this.errorMessage = "Unable to update todos";
+        });
     },
   },
 };
@@ -74,6 +109,7 @@ export default {
         <button
           class="todoapp__toggle-all"
           :class="{ active: activeTodos.length === 0 }"
+          @click="toggleAll"
         ></button>
 
         <form @submit.prevent="handleSubmit">
@@ -91,8 +127,8 @@ export default {
           v-for="(todo, index) of visibleTodos"
           :key="todo.id"
           :todo="todo"
-          @update="Object.assign(todo, $event)"
-          @delete="todos.splice(todos.indexOf(todo), 1)"
+          @update="updateTodo"
+          @delete="deleteTodo(todo.id)"
         />
       </TransitionGroup>
 
@@ -101,20 +137,26 @@ export default {
 
         <StatusFilter v-model="status" />
 
-        <button class="todoapp__clear-completed" v-if="activeTodos.length > 0">
+        <button class="todoapp__clear-completed" 
+          v-if="completedTodos.length > 0"
+          @click="clearCompleted"
+        >
           Clear completed
         </button>
       </footer>
     </div>
 
-    <article class="message is-danger message--hidden">
-      <div class="message-header">
-        <p>Error</p>
-        <button class="delete"></button>
-      </div>
+    <Message 
+      class="is-danger" 
+      :active="errorMessage !== ''"
+      @hide="errorMessage = ''"
+    >
+      <template #header>
+        <p>Server Error</p>
+      </template>
 
-      <div class="message-body">Unable to add a Todo</div>
-    </article>
+      <p>{{ errorMessage }}</p>
+    </Message>
   </div>
 </template>
 
